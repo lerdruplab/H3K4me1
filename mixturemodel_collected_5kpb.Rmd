@@ -1,0 +1,174 @@
+
+```{r}
+library(dplyr)
+library(fBasics)
+library(mixtools)
+```
+
+Loading in all data to make a collected dataframe
+```{r}
+collected_df1 <- read.table("collected_5kbpmatrix_rawReadCounts.txt",
+                            header = TRUE,
+                            sep = "\t",
+                            stringsAsFactors = TRUE)
+
+collected_df2 <- read.table("downsampledP10_5kbpmatrix_rawReadCounts.txt",
+                            header = TRUE,
+                            sep = "\t",
+                            stringsAsFactors = TRUE)
+
+collected_df1 <- collected_df1 %>% select(c(-P10_K4me1_rep1, -P10_K4me1_rep2))
+collected_df <- merge(collected_df1, collected_df2, by = "Bins")
+
+```
+
+Configuration k2
+```{r}
+CONFIG <- list(
+  seed = 123,
+  k_components = 2,
+  normalization_percentile = 0.05,
+  max_iterations = 100000
+)
+```
+
+Normalization function
+```{r}
+normalize_data <- function(data) {
+  index <- CONFIG$normalization_percentile * nrow(data)
+  
+  normalized_data <- apply(data, 2, function(col) {
+    sorted_col <- sort(col, decreasing = TRUE)
+    normalization_value <- sorted_col[index]
+    col / normalization_value
+  })
+  
+  return(as.data.frame(normalized_data))
+}
+```
+
+
+Normalizing data and averaging replicates
+```{r}
+rownames(collected_df) <- collected_df$Bins
+collected_df$Bins <- NULL
+collected_df_normalized <- normalize_data(collected_df)
+
+collected_df_averages <- collected_df_normalized %>%
+  mutate(
+    P10_k4me1 = (P10_k4me1_rep1 + P10_k4me1_rep2) / 2,
+    P10_k27me3 = P10_k27me3_rep1_dedup,
+    P10_k36me3 = (GO_P10_H3K36me3_rep1 + GO_P10_H3K36me3_rep1) / 2,
+    MII_k4me1 = (MII_k4me1_rep1 + MII_k4me1_rep2) / 2,
+    MII_k27me3 = (MII_K27me3_rep1 + MII_K27me3_rep2) / 2,
+    MII_k36me3 = (FGO_H3K36me3_rep1 + FGO_H3K36me3_rep2) / 2,
+    MII_k4me3 = (MII_H3K4me3_rep1 + MII_H3K4me3_rep2) / 2
+  )
+
+collected_df_averages <- collected_df_averages %>% select("P10_k4me1", "P10_k27me3", "P10_k36me3","MII_k4me1","MII_k27me3", "MII_k36me3", "MII_k4me3")
+
+#logtransforming the data and returning zeros back into zeros
+collected_df_averages <- log(collected_df_averages)
+collected_df_averages[collected_df_averages == Inf | collected_df_averages == -Inf] <- 0
+
+```
+
+
+Mixture model version where the population is divided into 2 subpopulations and the smallest value on population 2 is kept for later classification. Bins with zeros are removed from the analysis and put as population 3
+```{r}
+perform_mixture_analysis_new_k2 <- function(data) {
+  set.seed(CONFIG$seed)
+  
+  results <- data.frame(
+    Histone_mark = character(),
+    Skewness = numeric(),
+    Low_popmean = numeric(),
+    High_popmean = numeric(),
+    Min_pop2_value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  pop_assignments <- data.frame(row.names = rownames(data))
+  
+  for (i in 1:ncol(data)) {
+    columnname <- names(data)[i]
+    message("Analyzing: ", columnname)
+    
+    #leaving out the 0 signal bins
+    vec_full <- data[, i]
+    zero_idx <- which(vec_full == 0)
+    nonzero_idx <- which(vec_full != 0)
+    vec <- vec_full[nonzero_idx]
+    
+    model <- normalmixEM(
+      x = vec,
+      k = CONFIG$k_components,
+      maxit = CONFIG$max_iterations
+    )
+    
+    ord <- order(model$mu)
+    names(ord) <- c("1", "2")
+    
+    posterior <- model$posterior
+    max_comp <- apply(posterior, 1, which.max)
+    population_nonzero <- names(ord)[match(max_comp, ord)]
+    
+    population_full <- rep("3", length(vec_full))
+    population_full[nonzero_idx] <- population_nonzero
+    value_full <- vec_full
+    
+    min_pop2 <- suppressWarnings(min(vec[population_nonzero == "2"], na.rm = TRUE))
+    pop_assignments[[paste0(columnname, "_population")]] <- population_full
+    pop_assignments[[paste0(columnname, "_value")]] <- value_full
+    
+    results <- rbind(
+      results,
+      data.frame(
+        Histone_mark = columnname,
+        Skewness = skewness(vec, na.rm = TRUE)[1],
+        Low_popmean = model$mu[ord["1"]],
+        High_popmean = model$mu[ord["2"]],
+        Min_pop2_value = min_pop2,
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+  
+  return(list(
+    summary = results,
+    population_calls = pop_assignments
+  ))
+}
+```
+
+Preforming the analysis
+```{r}
+mixture_results_new_k2 <- perform_mixture_analysis_new_k2(collected_df_averages)
+
+results_k2 <- mixture_results_new_k2$population_calls
+```
+
+Here using the cutoff assigned by the mixture model to classify if the different bins are positive for the histone mark or not. OBS use separate script to check if the histograms are 
+```{r}
+results_final <- results_k2
+
+
+results_final <- results_final %>%
+  mutate(
+    p10_k4me1_signal  = if_else(P10_k4me1_value  < mixture_results_new_k2$summary$Min_pop2_value[1] | P10_k4me1_value == 0, 0L, 1L),
+    p10_k27me3_signal = if_else(P10_k27me3_value < mixture_results_new_k2$summary$Min_pop2_value[2] | P10_k27me3_value == 0, 0L, 1L),
+    p10_k36me3_signal = if_else(P10_k36me3_value < mixture_results_new_k2$summary$Min_pop2_value[3] | P10_k36me3_value == 0, 0L, 1L),
+    
+    MII_k4me1_signal  = if_else(MII_k4me1_value  < mixture_results_new_k2$summary$Min_pop2_value[4] | MII_k4me1_value == 0, 0L, 1L),
+    MII_k27me3_signal = if_else(MII_k27me3_value < mixture_results_new_k2$summary$Min_pop2_value[5] | MII_k27me3_value == 0, 0L, 1L),
+    MII_k36me3_signal = if_else(MII_k36me3_value < mixture_results_new_k2$summary$Min_pop2_value[6] | MII_k36me3_value == 0, 0L, 1L),
+    MII_k4me3_signal  = if_else(MII_k4me3_value  < mixture_results_new_k2$summary$Min_pop2_value[7] | MII_k4me3_value == 0, 0L, 1L)
+  )
+```
+
+Saving the final file
+```{r}
+write.table(results_final, "output_files/results_final.txt", row.names=TRUE, quote=FALSE, sep= '\t') 
+```
+
+

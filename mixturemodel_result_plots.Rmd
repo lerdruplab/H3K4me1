@@ -1,0 +1,244 @@
+Visualizing the results from the mixture model
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggalluvial)
+
+results_final <- read.table("output_files/results_final.txt", header = TRUE, sep = '\t')
+
+```
+
+
+Calculating each of the histone marks coverage in the different cell types based on the results from the mixture modeling
+```{r}
+coverage <- function(col) {
+  sum(results_final[[col]]) / nrow(results_final) * 100
+}
+
+coverage_cols <- c(
+  "p10_k4me1_signal", "p10_k27me3_signal", "p10_k36me3_signal",
+  "MII_k4me1_signal", "MII_k27me3_signal",
+  "MII_k36me3_signal", "MII_k4me3_signal"
+)
+
+collected_coverage_df <- tibble(
+  cellandmark = coverage_cols,
+  percentage  = sapply(coverage_cols, coverage),
+  mark = c("k4me1", "k27me3", "k36me3",
+           "k4me1", "k27me3", "k36me3", "k4me3")
+)
+
+print(collected_coverage_df)
+
+ggplot(collected_coverage_df,
+       aes(x = fct_rev(cellandmark),
+           y = percentage,
+           fill = mark)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(percentage, 1)),
+            vjust = -0.5, size = 3.5) +
+  labs(x = "", y = "Genome coverage (%)") +
+  theme_minimal()
+
+```
+Defining different categories of the genome to investigate the transition from p10 to MII oocytes
+```{r}
+
+# all categories
+results_final <- results_final %>%
+  mutate(
+    p10_profile_all = case_when(
+      p10_k4me1_signal == 0 & p10_k27me3_signal == 0 & p10_k36me3_signal == 0 ~ "no marks",
+      p10_k4me1_signal == 0 & p10_k27me3_signal == 1 & p10_k36me3_signal == 0 ~ "k27me3 only",
+      p10_k4me1_signal == 0 & p10_k27me3_signal == 0 & p10_k36me3_signal == 1 ~ "k36me3 only",
+      p10_k4me1_signal == 0 & p10_k27me3_signal == 1 & p10_k36me3_signal == 1 ~ "k27me3 + k36me3",
+      p10_k4me1_signal == 1 & p10_k27me3_signal == 0 & p10_k36me3_signal == 0 ~ "k4me1 only",
+      p10_k4me1_signal == 1 & p10_k27me3_signal == 1 & p10_k36me3_signal == 0 ~ "k4me1 + k27me3",
+      p10_k4me1_signal == 1 & p10_k27me3_signal == 0 & p10_k36me3_signal == 1 ~ "k4me1 + k36me3",
+      TRUE ~ "k4me1 + k27me3 + k36me3"
+    )
+  )
+
+# firstplot
+results_final <- results_final %>%
+  mutate(
+    p10_profile_firstplot = case_when(
+      p10_k4me1_signal == 1 ~ "k4me1",
+      TRUE ~ "no k4me1"
+    )
+  )
+
+# second plot
+results_final <- results_final %>%
+  mutate(
+    p10_profile_secondplot = case_when(
+      p10_k4me1_signal == 1 & p10_k27me3_signal == 0 ~ "k4me1 only",
+      p10_k4me1_signal == 1 & p10_k27me3_signal == 1 ~ "k4me1 + k27me3",
+      p10_k4me1_signal == 0 & p10_k27me3_signal == 1 ~ "k27me3 only",
+      TRUE ~ "no k4me1 or k27me3"
+    )
+  )
+
+# third plot
+results_final <- results_final %>%
+  mutate(
+    p10_profile_thirdplot = case_when(
+      p10_k4me1_signal == 1 & p10_k36me3_signal == 0 ~ "k4me1 only",
+      p10_k4me1_signal == 1 & p10_k36me3_signal == 1 ~ "k4me1 + k36me3",
+      p10_k4me1_signal == 0 & p10_k36me3_signal == 1 ~ "k36me3 only",
+      TRUE ~ "no k4me1 or k36me3"
+    )
+  )
+
+
+# MII categories
+# all included
+results_final <- results_final %>%
+  mutate(
+    MII_profile_all = case_when(
+      # no k4me1
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 0 & MII_k36me3_signal == 0 & MII_k4me3_signal == 0 ~ "no marks",
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 1 & MII_k36me3_signal == 0 & MII_k4me3_signal == 0 ~ "k27me3 only",
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 0 & MII_k36me3_signal == 1 & MII_k4me3_signal == 0 ~ "k36me3 only",
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 0 & MII_k36me3_signal == 0 & MII_k4me3_signal == 1 ~ "k4me3 only",
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 1 & MII_k36me3_signal == 1 & MII_k4me3_signal == 0 ~ "k27me3 + k36me3",
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 1 & MII_k36me3_signal == 0 & MII_k4me3_signal == 1 ~ "k27me3 + k4me3",
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 0 & MII_k36me3_signal == 1 & MII_k4me3_signal == 1 ~ "k36me3 + k4me3",
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 1 & MII_k36me3_signal == 1 & MII_k4me3_signal == 1 ~ "k27me3 + k36me3 + k4me3",
+      
+      # with k4me1
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 0 & MII_k36me3_signal == 0 & MII_k4me3_signal == 0 ~ "k4me1 only",
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 1 & MII_k36me3_signal == 0 & MII_k4me3_signal == 0 ~ "k4me1 + k27me3",
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 0 & MII_k36me3_signal == 1 & MII_k4me3_signal == 0 ~ "k4me1 + k36me3",
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 0 & MII_k36me3_signal == 0 & MII_k4me3_signal == 1 ~ "k4me1 + k4me3",
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 1 & MII_k36me3_signal == 1 & MII_k4me3_signal == 0 ~ "k4me1 + k27me3 + k36me3",
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 1 & MII_k36me3_signal == 0 & MII_k4me3_signal == 1 ~ "k4me1 + k27me3 + k4me3",
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 0 & MII_k36me3_signal == 1 & MII_k4me3_signal == 1 ~ "k4me1 + k36me3 + k4me3",
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 1 & MII_k36me3_signal == 1 & MII_k4me3_signal == 1 ~ "all marks"
+    )
+  )
+
+
+#first plot
+results_final <- results_final %>%
+  mutate(
+    MII_profile_firstplot = case_when(
+      # no k4me1
+      MII_k4me3_signal == 1 ~ "k4me3",
+      TRUE ~ "no k4me3"
+    )
+  )
+
+#secondplot
+results_final <- results_final %>%
+  mutate(
+    MII_profile_secondplot = case_when(
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 0 ~ "k4me1 only",
+      MII_k4me1_signal == 1 & MII_k27me3_signal == 1 ~ "k4me1 + k27me3",
+      MII_k4me1_signal == 0 & MII_k27me3_signal == 1 ~ "k27me3 only",
+      TRUE ~ "no k4me1 or k27me3"
+    )
+  )
+
+#thirdplot
+results_final <- results_final %>%
+  mutate(
+    MII_profile_thirdplot = case_when(
+      MII_k4me1_signal == 1 & MII_k36me3_signal == 0 ~ "k4me1 only",
+      MII_k4me1_signal == 1 & MII_k36me3_signal == 1 ~ "k4me1 + k36me3",
+      MII_k4me1_signal == 0 & MII_k36me3_signal == 1 ~ "k36me3 only",
+      TRUE ~ "no k4me1 or k36me3"
+    )
+  )
+
+
+```
+
+Pie charts to illuminate the size of the different categories, here using all possible categories
+```{r}
+# all categories
+p10_profile_table <- as.data.frame(table(results_final$p10_profile_all))
+pie(p10_profile_table$Freq, labels = p10_profile_table$Var1, main = "P10 profile")
+MII_profile_table <- as.data.frame(table(results_final$MII_profile_all))
+pie(MII_profile_table$Freq, labels = MII_profile_table$Var1, main = "MII profile")
+```
+
+Alluvial plots showing the transition from p10 to MII oocytes, here with different categories for easier interpretation
+```{r}
+#using a subset of the dataset for easier computation
+results_final_subset <- results_final[sample(nrow(results_final), 5000), ]
+
+
+results_final_subset %>%
+  mutate(freq = 1, p10_profile_all = factor(p10_profile_all,levels = c("no marks", "k27me3 only", "k27me3 + k36me3", "k36me3 only", "k4me1 + k36me3", "k4me1 + k27me3 + k36me3", "k4me1 + k27me3","k4me1 only")),
+        MII_profile_all = factor(MII_profile_all, levels = c("no marks", "k27me3 only", "k27me3 + k36me3", "k36me3 only", "k27me3 + k4me3","k36me3 + k4me3","k4me3 only", "k27me3 + k36me3 + k4me3", "k4me1 + k4me3", "k4me1 + k36me3 + k4me3","k4me1 + k36me3","k4me1 + k27me3 + k4me3","k4me1 + k27me3 + k36me3","k4me1 + k27me3","k4me1 only","all marks"))) %>%
+  ggplot(aes(axis1 = p10_profile_all,
+             axis2 = MII_profile_all,
+             y = freq)) +
+  geom_alluvium(aes(fill = p10_profile_all)) +
+  geom_stratum() +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(stratum))) +
+  theme_minimal()
+
+results_final_subset %>%
+  mutate(freq = 1, p10_profile_all = factor(p10_profile_all,levels = c("no marks", "k27me3 only", "k27me3 + k36me3", "k36me3 only", "k4me1 + k36me3", "k4me1 + k27me3 + k36me3", "k4me1 + k27me3","k4me1 only")),
+         MII_profile_all = factor(MII_profile_all, levels = c("no marks", "k36me3 only", "k27me3 + k36me3", "k27me3 only", "k27me3 + k4me3","k36me3 + k4me3","k4me3 only", "k27me3 + k36me3 + k4me3", "k4me1 + k4me3", "k4me1 + k36me3 + k4me3","k4me1 + k36me3","k4me1 + k27me3 + k4me3","k4me1 + k27me3 + k36me3","k4me1 + k27me3","k4me1 only","all marks"))) %>%
+  ggplot(aes(axis1 = MII_profile_all,
+             axis2 = p10_profile_all,
+             y = freq)) +
+  geom_alluvium(aes(fill = MII_profile_all)) +
+  geom_stratum() +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(stratum))) +
+  theme_minimal()
+
+
+
+#firstplot
+results_final_subset %>%
+  mutate(freq = 1) %>%
+  ggplot(aes(axis1 = p10_profile_firstplot,
+             axis2 = MII_profile_firstplot,
+             y = freq)) +
+  geom_alluvium(aes(fill = p10_profile_firstplot)) +
+  geom_stratum() +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(stratum))) +
+  theme_minimal()
+
+#secondplot
+results_final_subset %>%
+  mutate(freq = 1) %>%
+  ggplot(aes(axis1 = p10_profile_secondplot,
+             axis2 = MII_profile_secondplot,
+             y = freq)) +
+  geom_alluvium(aes(fill = p10_profile_secondplot)) +
+  geom_stratum() +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(stratum))) +
+  theme_minimal()
+
+#thirdplot
+results_final_subset %>%
+  mutate(freq = 1) %>%
+  ggplot(aes(axis1 = p10_profile_thirdplot,
+             axis2 = MII_profile_thirdplot,
+             y = freq)) +
+  geom_alluvium(aes(fill = p10_profile_thirdplot)) +
+  geom_stratum() +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(stratum))) +
+  theme_minimal()
+```
+
+Percentage of MII k4me3 positive bins that were k4me1 positive in p10
+```{r}
+nrow(results_final[results_final$p10_k4me1_signal == 1 & results_final$MII_k4me3_signal == 1, ])/nrow(results_final[results_final$MII_k4me3_signal == 1, ])*100
+```
+Percentage of P10 k4me1 positive bins that become MII k4me3 positive bins
+```{r}
+nrow(results_final[results_final$p10_k4me1_signal == 1 & results_final$MII_k4me3_signal == 1, ])/nrow(results_final[results_final$p10_k4me1_signal == 1, ])*100
+```
+
+
