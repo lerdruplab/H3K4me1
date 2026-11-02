@@ -1,5 +1,37 @@
 
-# exctracting non-cg 
+# mapping using bowtie2
+GENOME=/projects/lerdrup_group/data/indexes/mm10/index/BS_bowtie2_canonical
+bismark \
+    --genome "${GENOME}" \
+    -o files \
+    --parallel 4 \
+    -p 4 \
+    --pbat \
+    SRR25423360.fq.gz
+
+bismark \
+    --genome "${GENOME}" \
+    -o files \
+    --parallel 4 \
+    -p 4 \
+    --pbat \
+    SRR25423364.fq.gz
+
+# using bismark_methylation_extractor to extract the context of each methylation
+for bam in *_bismark_bt2.bam
+do
+    bismark_methylation_extractor \
+        --comprehensive \
+        --bedGraph \
+        --cytosine_report \
+        --CX \
+        -o methylationExtracted2 \
+        --parallel 4 \
+        --genome_folder /projects/lerdrup_group/data/indexes/mm10/index/BS_bowtie2_canonical \
+        "${bam}"
+done
+
+# filtering out non-cg with coverage between 5 and 500
 for sample in *.CX_report.txt
 do
     awk '
